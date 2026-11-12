@@ -309,6 +309,15 @@ for (const id of Object.keys(DEFAULTS)) {
 addEventListener("resize", layout);
 
 // ---- the source: the recorder, or ?demo ----
+/** A `voice` chunk as the rain takes it: bits as bytes. */
+function fromChunk(c) {
+  const bytes = (hex) => Uint8Array.from(hex.match(/../g) ?? [], (h) => parseInt(h, 16));
+  return {
+    callId: c.call_id, system: c.system, talkgroup: c.talkgroup, unit: c.unit, decrypted: c.decrypted,
+    codec: c.frames[0]?.codec ?? "imbe",
+    frames: c.frames.map((f) => ({ kind: f.kind, lost: f.erased, errors: f.errs, bits: bytes(f.bits) })),
+  };
+}
 async function connect() {
   const client = await import("/api/client.js");
   const rec = new client.TrunkClient();
@@ -331,7 +340,8 @@ async function connect() {
     rec.listen({ voice: true, audio: !!opts.sound, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
   };
   sound = { on: () => player.resume(), off: () => {} };
-  rec.on("voice", onVoice);
+  // A `voice` message's chunk (the plugin topic's), or an older recorder's binary frames.
+  rec.on("voice", (m) => onVoice(m.chunk ? fromChunk(m.chunk) : m));
   rec.on("audio", (chunk) => opts.sound && player.play(chunk));
   status = () => (rec.connected ? `● ${rec.phase?.phase === "running" ? "recording" : rec.phase?.phase ?? "connected"}` : "○ connecting…");
   relisten();
