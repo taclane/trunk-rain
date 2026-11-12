@@ -1,1 +1,14 @@
-{ "id": "rain", "name": "Vocoder Rain", "version": "0.1.0", "description": "Live digital voice as falling vocoder frames, one streak per 20 ms frame.", "api": 1, "access": "listen" }
+{
+  "id": "trunk-rain",
+  "name": "Vocoder Rain",
+  "version": "0.1.0",
+  "description": "Live digital voice as digital rain: each 20 ms vocoder frame falls as a streak of its own bits, in hex, kana or binary, tagged with its talkgroup and talker, damaged frames in red. A novelty.",
+  "api": 1,
+  "access": "listen",
+  "license": "MIT",
+  "repository": "https://github.com/taclane/trunk-rain",
+  "screenshots": [
+    { "path": "screenshots/main.png", "caption": "Each streak is one vocoder frame's bits in hex; damaged frames fall in red, and the tags name the talkgroup and the radio talking" },
+    { "path": "screenshots/kana.png", "caption": "Mirrored kana, coloured by talkgroup" }
+  ]
+}

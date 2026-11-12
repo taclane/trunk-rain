@@ -2,6 +2,8 @@
 // streak of its own bits. Frames come from the recorder's `listen` with
 // `voice: true` (`voice` messages); see /api/docs#vocoder-frames.
 
+import * as frames from "./frames.js";
+
 const $ = (id) => document.getElementById(id);
 const canvas = $("rain");
 const g = canvas.getContext("2d");
@@ -25,23 +27,7 @@ const save = () => {
 };
 
 // ---- glyphs ----
-const HEX = "0123456789ABCDEF";
-// Half-width katakana, one per nibble, drawn mirrored.
-const KANA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀ";
-const BITS = "01";
-const glyphSet = () => (opts.glyphs === "kana" ? KANA : opts.glyphs === "bits" ? BITS : HEX);
-
-/** A frame's information bits as glyph indices: nibbles (hex, kana) or bits. */
-function glyphsOf(bytes, codec) {
-  const nbits = codec === "imbe" ? 88 : 49;
-  const out = [];
-  if (opts.glyphs === "bits") {
-    for (let i = 0; i < nbits; i++) out.push((bytes[i >> 3] >> (7 - (i & 7))) & 1);
-  } else {
-    for (let i = 0; i < Math.ceil(nbits / 4); i++) out.push(i & 1 ? bytes[i >> 1] & 15 : bytes[i >> 1] >> 4);
-  }
-  return out;
-}
+const glyphSet = () => frames.glyphSet(opts.glyphs);
 
 // ---- grid and atlases ----
 /** Row `r` on screen: past the bottom it comes round to the top. */
@@ -97,15 +83,10 @@ function atlas(css, glow) {
 }
 
 // ---- colour ----
-const hash = (s) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return h >>> 0;
-};
 function hueOf(v) {
   switch (opts.color) {
-    case "tg": return hash(`${v.system}:${v.talkgroup}`) % 360;
-    case "unit": return v.unit ? hash(`${v.system}:${v.unit}`) % 360 : 135;
+    case "tg": return frames.hueOf(v.system, v.talkgroup);
+    case "unit": return v.unit ? frames.hueOf(v.system, v.unit) : 135;
     case "codec": return v.codec === "imbe" ? 135 : 185;
     default: return 135;
   }
@@ -129,7 +110,7 @@ function pickCol(now, len) {
 
 function spawn(v, f, tag, now) {
   if (drops.length >= MAX_DROPS) drops.splice(0, drops.length - MAX_DROPS + 1);
-  const glyphs = glyphsOf(f.bits, v.codec);
+  const glyphs = frames.glyphsOf(f.bits, v.codec, opts.glyphs);
   const len = glyphs.length;
   const speed = opts.speed * (0.75 + Math.random() * 0.5); // rows a second
   const col = pickCol(now, len);
@@ -137,7 +118,7 @@ function spawn(v, f, tag, now) {
   const r0 = Math.floor(Math.random() * rows);
   // The next drop in this column waits until this one's head is well down.
   colFreeAt[col] = now + ((len + 4) / speed) * 1000;
-  const bad = f.lost || f.kind === "repeat" || f.kind === "muted" || f.kind === "erasure";
+  const bad = frames.isBad(f);
   drops.push({ col, r0, y: r0, glyphs, len, speed, fade: Math.max(len, 12) * 1.3, hue: hueOf(v), bad, errs: f.errors, tag });
 }
 
@@ -309,15 +290,6 @@ for (const id of Object.keys(DEFAULTS)) {
 addEventListener("resize", layout);
 
 // ---- the source: the recorder, or ?demo ----
-/** A `voice` chunk as the rain takes it: bits as bytes. */
-function fromChunk(c) {
-  const bytes = (hex) => Uint8Array.from(hex.match(/../g) ?? [], (h) => parseInt(h, 16));
-  return {
-    callId: c.call_id, system: c.system, talkgroup: c.talkgroup, unit: c.unit, decrypted: c.decrypted,
-    codec: c.frames[0]?.codec ?? "imbe",
-    frames: c.frames.map((f) => ({ kind: f.kind, lost: f.erased, errors: f.errs, bits: bytes(f.bits) })),
-  };
-}
 async function connect() {
   const client = await import("/api/client.js");
   const rec = new client.TrunkClient();
@@ -340,7 +312,7 @@ async function connect() {
     rec.listen({ voice: true, audio: !!opts.sound, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
   };
   sound = { on: () => player.resume(), off: () => {} };
-  rec.on("voice", (m) => onVoice(fromChunk(m.chunk)));
+  rec.on("voice", (m) => onVoice(frames.fromChunk(m.chunk)));
   rec.on("audio", (chunk) => opts.sound && player.play(chunk));
   status = () => (rec.connected ? `● ${rec.phase?.phase === "running" ? "recording" : rec.phase?.phase ?? "connected"}` : "○ connecting…");
   relisten();
@@ -358,13 +330,13 @@ function demo(warmS) {
       talkers.push({ callId: (Math.random() * 1e9) | 0, system: 0, talkgroup: 100 + i, unit: 4000 + ((Math.random() * 900) | 0), codec: Math.random() < 0.6 ? "imbe" : "ambe", alias: aliases[i], left: 40 + ((Math.random() * 200) | 0) });
     }
     for (const t of talkers) {
-      const frames = [];
+      const made = [];
       for (let k = 0; k < 9 && t.left > 0; k++, t.left--) {
         const bits = new Uint8Array(t.codec === "imbe" ? 11 : 7).map(() => (Math.random() * 256) | 0);
         const r = Math.random();
-        frames.push({ kind: r < 0.03 ? "repeat" : "voice", lost: r > 0.995, errors: r < 0.2 ? (Math.random() * 6) | 0 : 0, bits });
+        made.push({ kind: r < 0.03 ? "repeat" : "voice", lost: r > 0.995, errors: r < 0.2 ? (Math.random() * 6) | 0 : 0, bits });
       }
-      onVoice({ ...t, decrypted: false, frames });
+      onVoice({ ...t, decrypted: false, frames: made });
     }
     for (let i = talkers.length - 1; i >= 0; i--) if (talkers[i].left <= 0) talkers.splice(i, 1);
   };
