@@ -1,6 +1,6 @@
 // Vocoder Rain: each 20 ms vocoder frame of live digital voice falls as one
 // streak of its own bits. Frames come from the recorder's `listen` with
-// `voice: true` (binary type 3); see /api/docs#vocoder-frames.
+// `voice: true` (`voice` messages); see /api/docs#vocoder-frames.
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("rain");
@@ -340,8 +340,7 @@ async function connect() {
     rec.listen({ voice: true, audio: !!opts.sound, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
   };
   sound = { on: () => player.resume(), off: () => {} };
-  // A `voice` message's chunk (the plugin topic's), or an older recorder's binary frames.
-  rec.on("voice", (m) => onVoice(m.chunk ? fromChunk(m.chunk) : m));
+  rec.on("voice", (m) => onVoice(fromChunk(m.chunk)));
   rec.on("audio", (chunk) => opts.sound && player.play(chunk));
   status = () => (rec.connected ? `● ${rec.phase?.phase === "running" ? "recording" : rec.phase?.phase ?? "connected"}` : "○ connecting…");
   relisten();
