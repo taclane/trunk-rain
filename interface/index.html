@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocoder Rain</title>
+<style>
+  :root { --fg: #8dffa8; --dim: #2f6b3c; --panel: rgba(0, 12, 4, 0.92); --edge: #1d4a28; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color: var(--fg); font: 13px ui-monospace, "DejaVu Sans Mono", Menlo, monospace; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 12px; bottom: 10px; color: var(--dim); pointer-events: none; white-space: pre; transition: opacity .6s; }
+  #gear { position: fixed; top: 10px; right: 12px; background: none; border: 1px solid var(--edge); color: var(--fg); font: inherit; padding: 4px 9px; cursor: pointer; border-radius: 4px; transition: opacity .6s; }
+  #panel { position: fixed; top: 44px; right: 12px; background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; padding: 12px 14px; display: none; min-width: 250px; max-width: calc(100vw - 52px); }
+  #panel.open { display: block; }
+  #panel label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 7px 0; }
+  #panel select, #panel input[type=text] { background: #000; color: var(--fg); border: 1px solid var(--edge); font: inherit; padding: 2px 4px; width: 9.5em; }
+  #panel input[type=range] { width: 9.5em; accent-color: #3fdc6a; }
+  #panel input[type=checkbox] { accent-color: #3fdc6a; }
+  #panel h2 { font-size: 12px; margin: 0 0 6px; color: var(--dim); font-weight: normal; letter-spacing: .1em; text-transform: uppercase; }
+  .idle #gear, .idle #hud { opacity: 0; }
+  .idle { cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="rain"></canvas>
+<div id="hud"></div>
+<button id="gear" title="Options">⚙</button>
+<div id="panel">
+  <h2>Vocoder Rain</h2>
+  <label>Tags <select id="tags">
+    <option value="both">talkgroup + talker</option>
+    <option value="tg">talkgroup</option>
+    <option value="unit">talker</option>
+    <option value="off">off</option>
+  </select></label>
+  <label>Tag every <select id="tagEvery">
+    <option value="sec">second</option>
+    <option value="tx">transmission</option>
+    <option value="drop">frame</option>
+  </select></label>
+  <label>Colour <select id="color">
+    <option value="classic">classic green</option>
+    <option value="tg">by talkgroup</option>
+    <option value="unit">by talker</option>
+    <option value="codec">by codec</option>
+  </select></label>
+  <label>Glyphs <select id="glyphs">
+    <option value="hex">hex</option>
+    <option value="kana">kana (mirrored)</option>
+    <option value="bits">bits</option>
+  </select></label>
+  <label>Speed <input id="speed" type="range" min="4" max="60" step="1"></label>
+  <label>Size <input id="size" type="range" min="10" max="32" step="1"></label>
+  <label>Damaged frames in red <input id="bad" type="checkbox"></label>
+  <label>Errors flicker <input id="flicker" type="checkbox"></label>
+  <label>Sound <input id="sound" type="checkbox"></label>
+  <label>Talkgroup <input id="tgFilter" type="text" placeholder="all"></label>
+</div>
+<script type="module" src="rain.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{ "id": "rain", "name": "Vocoder Rain", "version": "0.1.0", "description": "Live digital voice as falling vocoder frames, one streak per 20 ms frame.", "api": 1, "access": "listen" }
