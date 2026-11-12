@@ -3,11 +3,14 @@
 A Trunk Recorder Pro interface that shows live digital voice as falling vocoder frames: each
 20 ms IMBE or AMBE+2 frame falls as one streak of its own information bits, in hex (or kana,
 or bits). The head of a streak is bright, the trail fades. Damaged frames (repeated, muted,
-lost) fall in red. Glyphs flicker as many times as the FEC corrected errors. Tags on the
+lost) fall in red. Frames the FEC had to correct flicker, more with more errors. Tags on the
 heads name the talkgroup and the radio talking.
 
-It's a novelty. It needs a recorder whose API has vocoder frames (`listen` with
-`voice: true`).
+![Vocoder Rain, demo mode](docs/screenshot.png)
+
+It's a novelty. It needs a Trunk Recorder Pro whose interface API sends vocoder frames
+(`listen` with `voice: true`, a `voice` message per live audio chunk): newer than 0.3.6.
+Analog calls have no frames, so only digital voice falls.
 
 ## Use
 
