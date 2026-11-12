@@ -44,6 +44,8 @@ function glyphsOf(bytes, codec) {
 }
 
 // ---- grid and atlases ----
+/** Row `r` on screen: past the bottom it comes round to the top. */
+const wrap = (r) => ((r % rows) + rows) % rows;
 let dpr = 1, W = 0, H = 0, cw = 10, ch = 16, cols = 0, rows = 0;
 const PAD = 6; // room for each glyph's glow in its atlas cell
 let atlases = new Map();
@@ -58,7 +60,7 @@ function layout() {
   cw = Math.ceil(opts.size * 0.72);
   ch = Math.ceil(opts.size * 1.12);
   cols = Math.max(1, Math.floor(W / cw));
-  rows = Math.ceil(H / ch) + 1;
+  rows = Math.max(1, Math.ceil(H / ch));
   atlases = new Map();
   for (const d of drops) d.col %= cols;
 }
@@ -131,7 +133,8 @@ function spawn(v, f, tag, now) {
   const len = glyphs.length;
   const speed = opts.speed * (0.75 + Math.random() * 0.5); // rows a second
   const col = pickCol(now, len);
-  const r0 = Math.floor(Math.random() * rows * 0.55) - 2;
+  // Anywhere: a streak that crosses the bottom carries on from the top.
+  const r0 = Math.floor(Math.random() * rows);
   // The next drop in this column waits until this one's head is well down.
   colFreeAt[col] = now + ((len + 4) / speed) * 1000;
   const bad = f.lost || f.kind === "repeat" || f.kind === "muted" || f.kind === "erasure";
@@ -233,17 +236,16 @@ function draw(t) {
     const x = d.col * cw;
     const top = Math.max(d.r0, head - Math.ceil(d.fade));
     for (let r = Math.min(head, last); r >= top; r--) {
-      if (r < 0 || r >= rows) continue;
       const k = r - d.r0;
       const dist = head - r;
       const a = dist === 0 ? lit : body;
       g.globalAlpha = dist === 0 ? 1 : Math.pow(Math.max(0, 1 - dist / d.fade), 1.6) * 0.95;
       if (g.globalAlpha <= 0.01) continue;
       const gi = d.glyphs[k] % set;
-      g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, x - PAD, r * ch - PAD, a.cellW, a.cellH);
+      g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, x - PAD, wrap(r) * ch - PAD, a.cellW, a.cellH);
     }
     if (d.tag && head <= last + d.fade * 0.6) {
-      tags.push({ x: x + cw + 3, y: Math.min(head, last) * ch, text: d.tag, hue: d.hue, alpha: head <= last ? 1 : 1 - (head - last) / (d.fade * 0.6) });
+      tags.push({ x: x + cw + 3, y: wrap(Math.min(head, last)) * ch, text: d.tag, hue: d.hue, alpha: head <= last ? 1 : 1 - (head - last) / (d.fade * 0.6) });
     }
   }
   g.globalAlpha = 1;
