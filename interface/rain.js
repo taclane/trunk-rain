@@ -9,7 +9,7 @@ const canvas = $("rain");
 const g = canvas.getContext("2d");
 
 // ---- settings (a convenience: the page works without storage) ----
-const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.15, bad: true, flicker: true, sound: false, tgFilter: "" };
+const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.15, bloom: true, bad: true, flicker: true, sound: false, tgFilter: "" };
 const opts = { ...DEFAULTS };
 try {
   Object.assign(opts, JSON.parse(localStorage.getItem("rain.opts") ?? "{}"));
@@ -61,6 +61,8 @@ function layout() {
   const n = cols * rows;
   cell = grid(n);
   ccCell = grid(n);
+  colSpeed = Float32Array.from({ length: cols }, () => 0.75 + Math.random() * 0.5);
+  colFreeAt[0].length = colFreeAt[1].length = 0;
   for (const d of drops) d.col %= cols;
 }
 
@@ -115,13 +117,19 @@ function hueOf(v) {
 // ---- drops: one a frame, writing its glyphs as it falls ----
 const drops = [];
 const MAX_DROPS = 1800;
-const colFreeAt = []; // a column's last drop has left room for another (ms)
+// Each column falls at a speed of its own, so drops sharing it keep their
+// distance, and takes a new drop only once its last has finished writing:
+// raindrops never collide. One set of columns a layer.
+const colFreeAt = [[], []]; // [voice, control]: when each column is free (ms)
+let colSpeed = new Float32Array(0);
 
-function pickCol(now) {
+function pickCol(now, layer) {
+  const free = colFreeAt[layer];
   let best = 0, bestT = Infinity;
-  for (let i = 0; i < 10; i++) {
-    const c = (Math.random() * cols) | 0;
-    const t = colFreeAt[c] ?? 0;
+  const start = (Math.random() * cols) | 0;
+  for (let i = 0; i < cols; i++) {
+    const c = (start + i * 7919) % cols; // a scattered walk through every column
+    const t = free[c] ?? 0;
     if (t <= now) return c;
     if (t < bestT) [best, bestT] = [c, t];
   }
@@ -134,12 +142,12 @@ function spawn(v, fs, tag, now) {
   const base = Math.round(hueOf(v) / 10) * 10;
   const { glyphs, hues, errs } = frames.stack(fs.map((f) => ({ glyphs: frames.glyphsOf(f.bits, v.codec, opts.glyphs), hue: frames.isBad(f) && opts.bad ? -1 : base, errs: f.errors })));
   const len = glyphs.length;
-  const speed = opts.speed * (0.75 + Math.random() * 0.5); // rows a second
-  const col = pickCol(now);
+  const col = pickCol(now, 0);
+  const speed = opts.speed * colSpeed[col]; // rows a second
   // Anywhere: a streak that crosses the bottom carries on from the top.
   const r0 = Math.floor(Math.random() * rows);
   // The next drop in this column waits until this one's head is well down.
-  colFreeAt[col] = now + ((len + 4) / speed) * 1000;
+  colFreeAt[0][col] = now + ((len + 2) / speed) * 1000;
   // Its trail is gone this many rows behind its head (the glow, about half of it).
   const fade = Math.max(4, opts.trail);
   drops.push({ col, r0, y: r0, laid: 0, glyphs, hues, errs, len, speed, decay: speed / fade, hue: base, call: v.callId, tag, doneAt: 0 });
@@ -177,10 +185,12 @@ function spawnCC(l, now) {
   if (drops.length >= MAX_DROPS) drops.splice(0, drops.length - MAX_DROPS + 1);
   const tg = frames.ccTalkgroup(l.text);
   const hue = opts.color === "tg" && tg != null ? Math.round(frames.hueOf(names.systemIndex(l.system), tg) / 10) * 10 : 135;
-  const speed = opts.speed * 0.6 * (0.8 + Math.random() * 0.4);
-  const r0 = Math.floor(Math.random() * rows);
   const len = glyphs.length;
-  drops.push({ cc: true, col: (Math.random() * cols) | 0, r0, y: r0, laid: 0, glyphs, hues: new Array(len).fill(hue), errs: new Array(len).fill(0), len, speed, decay: speed / Math.max(4, opts.trail), hue, call: CC, tag: null, doneAt: 0 });
+  const col = pickCol(now, 1);
+  const speed = opts.speed * 0.6 * colSpeed[col];
+  colFreeAt[1][col] = now + ((len + 2) / speed) * 1000;
+  const r0 = Math.floor(Math.random() * rows);
+  drops.push({ cc: true, col, r0, y: r0, laid: 0, glyphs, hues: new Array(len).fill(hue), errs: new Array(len).fill(0), len, speed, decay: speed / Math.max(4, opts.trail), hue, call: CC, tag: null, doneAt: 0 });
   newest.set(CC, { glyphs, at: now });
   ccSeen++;
 }
@@ -238,6 +248,7 @@ let names = { talkgroup: (v) => `TG ${v.talkgroup}`, unit: (v) => (v.unit ? `${v
 
 // ---- drawing ----
 let lastT = clock();
+const bloom = document.createElement("canvas");
 const TAG_FONT = () => `${Math.max(10, Math.round(opts.size * 0.72))}px ui-monospace, "DejaVu Sans Mono", monospace`;
 
 function frame() {
@@ -353,6 +364,21 @@ function draw(t) {
     const h = d.hues[d.laid - 1] < 0 ? 0 : d.hues[d.laid - 1];
     if (!d.doneAt) put(atlas(`hsl(${h} 100% 90%)`, `hsl(${h} 100% 72%)`), cell.glyph[c] % set, c);
     if (d.tag) tags.push({ x: (d.col + 1) * cw + 3, y: row * ch, text: d.tag, hue: d.hue, alpha: d.doneAt ? Math.max(0, 1 - (t - d.doneAt) / 1000) : 1 });
+  }
+
+  // Bloom: the rain, small and soft (scaled down, then up), added over itself.
+  if (opts.bloom) {
+    const bw = Math.max(1, Math.round(W / 6)), bh = Math.max(1, Math.round(H / 6));
+    if (bloom.width !== bw || bloom.height !== bh) Object.assign(bloom, { width: bw, height: bh });
+    const b = bloom.getContext("2d");
+    b.clearRect(0, 0, bw, bh);
+    b.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, bw, bh);
+    g.globalCompositeOperation = "lighter";
+    g.globalAlpha = 0.55;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(bloom, 0, 0, W, H);
+    g.globalCompositeOperation = "source-over";
+    g.globalAlpha = 1;
   }
 
   // Tags ride their drop's head, over the rain.

@@ -77,7 +77,7 @@ test("stacked frames keep each glyph's own hue and errors", () => {
   assert.deepEqual(s, { glyphs: [1, 2, 3], hues: [135, 135, -1], errs: [0, 0, 4] });
 });
 
-import { ccShown, ccNibbles, nibbleGlyphs, ccTalkgroup } from "../interface/frames.js";
+import { ccShown, ccNibbles, nibbleGlyphs, ccTalkgroup, KANA } from "../interface/frames.js";
 
 test("control channel lines: which ones fall", () => {
   const line = (kind, extra = {}) => ({ timeS: 1, kind, text: "", system: "CLMRN", site: "clmrn-G", ...extra });
@@ -101,4 +101,15 @@ test("a message's numbers become nibbles", () => {
   assert.deepEqual(nibbleGlyphs([0xa], "hex"), [0xa]);
   assert.equal(ccTalkgroup("Grant TG 11501 771.35625 MHz"), 11501);
   assert.equal(ccTalkgroup("Deregistration 1891034"), null);
+});
+
+test("kana: 64 glyphs of six bits, with digits and symbols", () => {
+  assert.equal([...KANA].length, 64);
+  assert.ok(/[0-9]/.test(KANA) && KANA.includes(":"));
+  const bits = fromChunk(chunk).frames[0].bits;
+  const g = glyphsOf(bits, "imbe", "kana");
+  assert.equal(g.length, 15); // 88 bits
+  assert.equal(g[0], 0x19 >> 2); // 000110|01…
+  assert.ok(g.every((x) => x < 64));
+  assert.deepEqual(nibbleGlyphs([0xf, 0xf, 0xf], "kana"), [63, 63]);
 });

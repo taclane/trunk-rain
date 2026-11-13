@@ -2,8 +2,9 @@
 // the tests can run it in Node.
 
 export const HEX = "0123456789ABCDEF";
-// Half-width katakana, one per nibble, drawn mirrored.
-export const KANA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀ";
+// 64 glyphs, six bits each, drawn mirrored: half-width katakana, the digits
+// and a few symbols, all in an ordinary font.
+export const KANA = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛ" + "0123456789" + ':.=*+-<>¦|"';
 export const BITS = "01";
 
 /** The glyphs of a style: "hex", "kana" or "bits". */
@@ -32,16 +33,25 @@ export function fromChunk(c) {
 /** Not played as sent: repeated, muted, an erasure, or lost (a tone frame plays as its tone). */
 export const isBad = (f) => f.lost || f.kind === "repeat" || f.kind === "muted" || f.kind === "erasure";
 
-/** A frame's information bits as glyph indices: nibbles ("hex", "kana") or single bits ("bits"). */
-export function glyphsOf(bytes, codec, style) {
-  const nbits = frameBits(codec);
+/** Bits each glyph of a style shows: hex 4, kana 6, bits 1. */
+export const glyphBits = (style) => (style === "kana" ? 6 : style === "bits" ? 1 : 4);
+
+/** Bits (0 / 1) as glyph indices, `width` bits a glyph, the last zero-padded. */
+export function chunkBits(bits, width) {
   const out = [];
-  if (style === "bits") {
-    for (let i = 0; i < nbits; i++) out.push((bytes[i >> 3] >> (7 - (i & 7))) & 1);
-  } else {
-    for (let i = 0; i < Math.ceil(nbits / 4); i++) out.push(i & 1 ? bytes[i >> 1] & 15 : bytes[i >> 1] >> 4);
+  for (let i = 0; i < bits.length; i += width) {
+    let v = 0;
+    for (let j = 0; j < width; j++) v = (v << 1) | (bits[i + j] ?? 0);
+    out.push(v);
   }
   return out;
+}
+
+/** A frame's information bits as glyph indices, as many bits a glyph as its style shows. */
+export function glyphsOf(bytes, codec, style) {
+  const nbits = frameBits(codec);
+  const bits = Array.from({ length: nbits }, (_, i) => (bytes[i >> 3] >> (7 - (i & 7))) & 1);
+  return chunkBits(bits, glyphBits(style));
 }
 
 /**
@@ -130,10 +140,9 @@ export function ccNibbles(text, max = 24) {
   return out.slice(0, max);
 }
 
-/** Nibbles as glyph indices in a style: themselves, or four bits each ("bits"). */
+/** Nibbles as glyph indices in a style: regrouped into its bits a glyph. */
 export function nibbleGlyphs(nibbles, style) {
-  if (style !== "bits") return nibbles;
-  return nibbles.flatMap((n) => [n >> 3, (n >> 2) & 1, (n >> 1) & 1, n & 1]);
+  return chunkBits(nibbles.flatMap((n) => [n >> 3, (n >> 2) & 1, (n >> 1) & 1, n & 1]), glyphBits(style));
 }
 
 /** The talkgroup a control channel message names, if any ("TG 301"). */

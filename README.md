@@ -39,7 +39,7 @@ of rain already fallen.
 | `tags` | `both`, `tg`, `unit`, `off` |
 | `tagEvery` | `sec`, `tx` (each transmission), `drop` (each frame) |
 | `color` | `classic`, `tg`, `unit`, `codec` |
-| `glyphs` | `hex`, `kana`, `bits` |
+| `glyphs` | `hex` (4 bits a glyph), `kana` (6 bits: 64 mirrored half-width katakana, digits and symbols), `bits` |
 | `stack` | frames a streak, 1–4 (default 2): a talker's frames end to end, for longer streaks |
 | `trail` | rows behind a head until a glyph is dark, 6–60 (default 20) |
 | `change` | `data` (a lit glyph changes to the same place in the talker's newest frame), `random`, `off` |
@@ -48,7 +48,7 @@ of rain already fallen.
 | `ccLevel` | the control channel layer's brightness, 0.02–1 (default 0.15: background noise) |
 | `speed` | rows a second, 4–60 |
 | `size` | glyph size, px |
-| `bad`, `flicker`, `sound` | `1` / `0` |
+| `bloom`, `bad`, `flicker`, `sound` | `1` / `0` |
 | `tgFilter` | a talkgroup number (filtered at the recorder) or text to match its alpha tag |
 
 ## Development

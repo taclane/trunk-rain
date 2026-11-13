@@ -14,6 +14,10 @@
 - The control channel on a layer of its own behind the voice (`cc`: every message, grants/updates/units
   only, or off; `ccLevel` its brightness, background noise by default): each message's numbers fall as
   glyphs, from the `log` topic. A lit voice glyph covers what's behind it.
+- Each column falls at a speed of its own and takes a new drop only once its last has finished:
+  drops in a column never collide.
+- Kana is 64 glyphs, six bits each: half-width katakana with the digits and a few symbols, mirrored.
+- Bloom (`bloom`, on by default): a soft glow where the rain is bright.
 
 ## [0.1.0]
 
