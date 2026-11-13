@@ -49,6 +49,7 @@ of rain already fallen.
 | `speed` | rows a second, 4–60 |
 | `size` | glyph size, px |
 | `bloom`, `bad`, `flicker`, `sound` | `1` / `0` |
+| `system` | a system's short name, or empty for all of them (filtered at the recorder) |
 | `tgFilter` | a talkgroup number (filtered at the recorder) or text to match its alpha tag |
 
 ## Development

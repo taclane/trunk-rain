@@ -50,8 +50,9 @@ test("damaged frames: repeated, muted, erasures and lost ones, not tones", () =>
 test("neighbouring talkgroups get colours far apart", () => {
   const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   const hues = [100, 101, 102, 103, 104, 105].map((tg) => hueOf(0, tg));
-  for (let i = 0; i < hues.length; i++) for (let j = i + 1; j < hues.length; j++) assert.ok(gap(hues[i], hues[j]) >= 30, `${100 + i} and ${100 + j}`);
+  for (let i = 0; i < hues.length; i++) for (let j = i + 1; j < hues.length; j++) assert.ok(gap(hues[i], hues[j]) >= 25, `${100 + i} and ${100 + j}`);
   assert.ok(hues.every((h) => h >= 0 && h < 360));
+  for (let id = 0; id < 5000; id++) assert.ok(hueOf(id % 3, id) >= 25 && hueOf(id % 3, id) <= 335, "never red");
   assert.notEqual(hueOf(0, 101), hueOf(1, 101), "another system's 101");
 });
 

@@ -18,6 +18,9 @@
   drops in a column never collide.
 - Kana is 64 glyphs, six bits each: half-width katakana with the digits and a few symbols, mirrored.
 - Bloom (`bloom`, on by default): a soft glow where the rain is bright.
+- A System menu (`system`): all systems, or one; it filters the voice and the control channel, and the
+  talkgroup filter applies within it.
+- Talkgroup and talker colours are never red, the colour of a damaged frame.
 
 ## [0.1.0]
 

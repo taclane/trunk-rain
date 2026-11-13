@@ -57,9 +57,10 @@ export function glyphsOf(bytes, codec, style) {
 /**
  * A hue for talkgroup or radio `id` of system `system`, degrees: a golden
  * angle (137.5°) apart for each step, so neighbouring numbers, often one
- * agency's, still get colours far apart.
+ * agency's, still get colours far apart. Never red (25°–335° only): red is
+ * a damaged frame's.
  */
-export const hueOf = (system, id) => (((id + system * 0.381966) * 137.50776) % 360 + 360) % 360;
+export const hueOf = (system, id) => 25 + ((((id + system * 0.381966) * 137.50776) % 360 + 360) % 360) * (310 / 360);
 
 /**
  * A trail glyph's brightness, 1 at the head down to 0 at `fade` rows behind

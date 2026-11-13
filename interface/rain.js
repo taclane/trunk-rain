@@ -9,7 +9,7 @@ const canvas = $("rain");
 const g = canvas.getContext("2d");
 
 // ---- settings (a convenience: the page works without storage) ----
-const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.15, bloom: true, bad: true, flicker: true, sound: false, tgFilter: "" };
+const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.15, bloom: true, bad: true, flicker: true, sound: false, system: "", tgFilter: "" };
 const opts = { ...DEFAULTS };
 try {
   Object.assign(opts, JSON.parse(localStorage.getItem("rain.opts") ?? "{}"));
@@ -171,6 +171,7 @@ function onLog(m) {
 }
 
 function ccPasses(l) {
+  if (opts.system && l.system !== opts.system) return false;
   const want = opts.tgFilter.trim();
   if (!want) return true;
   const tg = frames.ccTalkgroup(l.text);
@@ -238,13 +239,26 @@ function onVoice(v) {
 }
 
 function passes(v) {
+  if (opts.system && names.systemName(v.system) !== opts.system) return false;
   const want = opts.tgFilter.trim();
   if (!want || /^\d+$/.test(want)) return true; // a number filters at the recorder
   return names.talkgroup(v).toLowerCase().includes(want.toLowerCase());
 }
 
 // ---- names (the recorder's, or the demo's) ----
-let names = { talkgroup: (v) => `TG ${v.talkgroup}`, unit: (v) => (v.unit ? `${v.unit}` : ""), systemIndex: () => 0 };
+let names = { talkgroup: (v) => `TG ${v.talkgroup}`, unit: (v) => (v.unit ? `${v.unit}` : ""), systemIndex: () => 0, systemName: () => "" };
+
+/** The System menu: all systems, or one; kept as chosen while the list changes. */
+let systemsShown = "";
+function setSystems(list) {
+  const key = list.join("\n");
+  if (key === systemsShown) return;
+  systemsShown = key;
+  const el = $("system");
+  const want = opts.system && !list.includes(opts.system) ? [...list, opts.system] : list;
+  el.replaceChildren(new Option("all systems", ""), ...want.map((n) => new Option(n, n)));
+  el.value = opts.system;
+}
 
 // ---- drawing ----
 let lastT = clock();
@@ -436,7 +450,7 @@ for (const id of Object.keys(DEFAULTS)) {
     save();
     if (id === "size" || id === "glyphs") layout();
     if (id === "sound") opts.sound ? sound.on() : sound.off();
-    if (id === "sound" || id === "tgFilter" || id === "cc") relisten();
+    if (id === "sound" || id === "tgFilter" || id === "cc" || id === "system") relisten();
   });
 }
 addEventListener("resize", layout);
@@ -459,10 +473,15 @@ async function connect() {
       return (short && rec.unitName(short, v.unit)) || `${v.unit}`;
     },
     systemIndex: (short) => Math.max(0, rec.status?.systemNames?.indexOf(short) ?? 0),
+    systemName: (i) => client.systemName(rec.status, i),
   };
+  // The systems: those recording (status), else those set up (config).
+  const systems = () => rec.status?.systemNames?.length ? rec.status.systemNames : [...(rec.config?.systems ?? []), ...(rec.config?.conventional ?? [])].map((s) => s.shortName);
+  rec.on("status", () => setSystems(systems()));
+  rec.on("config", () => setSystems(systems()));
   relisten = () => {
     const want = opts.tgFilter.trim();
-    rec.listen({ voice: true, audio: !!opts.sound, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
+    rec.listen({ voice: true, audio: !!opts.sound, system: opts.system || null, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
     // The control channel's messages come on the log topic.
     rec.subscribe(opts.cc === "off" ? [] : ["log"]);
     ccQueue.length = 0;
@@ -512,7 +531,8 @@ function demo(warmS) {
     }
     onLog({ lines: lines.map((l) => ({ timeS: 0, system: "demo", site: "demo", ...l })) });
   };
-  names = { talkgroup: (v) => v.alias ?? `TG ${v.talkgroup}`, unit: (v) => `Unit ${v.unit}` };
+  names = { talkgroup: (v) => v.alias ?? `TG ${v.talkgroup}`, unit: (v) => `Unit ${v.unit}`, systemIndex: () => 0, systemName: () => "demo" };
+  setSystems(["demo"]);
   // ?warm=N: N seconds of it already fallen (for screenshots).
   for (let ms = 0; ms < warmS * 1000; ms += 20) {
     ahead += 20;
