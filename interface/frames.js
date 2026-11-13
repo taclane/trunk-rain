@@ -93,3 +93,51 @@ export function stack(parts) {
   }
   return { glyphs, hues, errs };
 }
+
+// ---- the control channel, as the `log` topic gives it ----
+
+/** Control channel message kinds that are radios and calls: grants, updates, units, patches. */
+export const ACTIVITY = new Set([
+  "grant", "uu_v_grant", "phone_grant", "data_grant", "deny", "queued", "uu_ans_req",
+  "update", "uu_v_update", "phone_update",
+  "registration", "deregistration", "affiliation", "location", "acknowledge", "call_alert", "status_update", "message_update", "emergency_alarm",
+  "patch_add", "patch_delete",
+]);
+// The recorder's own lines and notes, not the control channel's.
+const NOT_CC = new Set(["info", "plugin", "note", "error", "warning", "alias"]);
+
+/**
+ * Whether a log line is a control channel message the rain shows: `mode`
+ * "all" (every message heard, site broadcasts and undecoded ones too),
+ * "activity" (grants, updates, units, patches) or "off".
+ */
+export function ccShown(line, mode) {
+  if (mode === "off" || !line.system || line.level || NOT_CC.has(line.kind)) return false;
+  return mode === "all" || ACTIVITY.has(line.kind);
+}
+
+/**
+ * A control channel message's numbers as hex nibbles: its talkgroups,
+ * radios, frequencies (the decimal point dropped) and hex fields, in order,
+ * at most `max`.
+ */
+export function ccNibbles(text, max = 24) {
+  const out = [];
+  for (const m of text.matchAll(/0x([0-9a-f]+)|(\d+(?:\.\d+)?)/gi)) {
+    const hex = m[1] ?? BigInt(m[2].replace(".", "")).toString(16);
+    for (const c of hex) out.push(parseInt(c, 16));
+  }
+  return out.slice(0, max);
+}
+
+/** Nibbles as glyph indices in a style: themselves, or four bits each ("bits"). */
+export function nibbleGlyphs(nibbles, style) {
+  if (style !== "bits") return nibbles;
+  return nibbles.flatMap((n) => [n >> 3, (n >> 2) & 1, (n >> 1) & 1, n & 1]);
+}
+
+/** The talkgroup a control channel message names, if any ("TG 301"). */
+export function ccTalkgroup(text) {
+  const m = /\bTG (\d+)/.exec(text);
+  return m ? Number(m[1]) : null;
+}

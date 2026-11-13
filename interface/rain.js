@@ -9,7 +9,7 @@ const canvas = $("rain");
 const g = canvas.getContext("2d");
 
 // ---- settings (a convenience: the page works without storage) ----
-const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, bad: true, flicker: true, sound: false, tgFilter: "" };
+const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.5, bad: true, flicker: true, sound: false, tgFilter: "" };
 const opts = { ...DEFAULTS };
 try {
   Object.assign(opts, JSON.parse(localStorage.getItem("rain.opts") ?? "{}"));
@@ -55,7 +55,7 @@ function layout() {
   rows = Math.max(1, Math.ceil(H / ch));
   atlases = new Map();
   const n = cols * rows;
-  cell = { glyph: new Uint8Array(n), bright: new Float32Array(n), decay: new Float32Array(n), hue: new Int16Array(n), age: new Float32Array(n), errs: new Uint8Array(n), call: new Float64Array(n), k: new Uint8Array(n) };
+  cell = { glyph: new Uint8Array(n), bright: new Float32Array(n), decay: new Float32Array(n), hue: new Int16Array(n), age: new Float32Array(n), errs: new Uint8Array(n), call: new Float64Array(n), k: new Uint8Array(n), layer: new Uint8Array(n) };
   for (const d of drops) d.col %= cols;
 }
 
@@ -141,6 +141,44 @@ function spawn(v, fs, tag, now) {
   newest.set(v.callId, { glyphs, at: now });
 }
 
+// ---- the control channel: a dimmer layer behind the voice ----
+// Its messages' numbers fall as glyphs too: slower, dimmer, never over a lit
+// voice glyph. Lines come in bursts; they fall evenly over the next second.
+const CC = -1; // `newest`'s key for the newest control channel message
+const ccQueue = [];
+let ccSeen = 0;
+
+function onLog(m) {
+  for (const l of m.lines) {
+    if (!frames.ccShown(l, opts.cc) || !ccPasses(l)) continue;
+    ccQueue.push(l);
+  }
+  if (ccQueue.length > 600) ccQueue.splice(0, ccQueue.length - 600);
+}
+
+function ccPasses(l) {
+  const want = opts.tgFilter.trim();
+  if (!want) return true;
+  const tg = frames.ccTalkgroup(l.text);
+  if (tg == null) return false;
+  if (/^\d+$/.test(want)) return tg === Number(want);
+  return names.talkgroup({ system: names.systemIndex(l.system), talkgroup: tg }).toLowerCase().includes(want.toLowerCase());
+}
+
+function spawnCC(l, now) {
+  const glyphs = frames.nibbleGlyphs(frames.ccNibbles(l.text), opts.glyphs);
+  if (!glyphs.length) return;
+  if (drops.length >= MAX_DROPS) drops.splice(0, drops.length - MAX_DROPS + 1);
+  const tg = frames.ccTalkgroup(l.text);
+  const hue = opts.color === "tg" && tg != null ? Math.round(frames.hueOf(names.systemIndex(l.system), tg) / 10) * 10 : 135;
+  const speed = opts.speed * 0.6 * (0.8 + Math.random() * 0.4);
+  const r0 = Math.floor(Math.random() * rows);
+  const len = glyphs.length;
+  drops.push({ cc: true, col: (Math.random() * cols) | 0, r0, y: r0, laid: 0, glyphs, hues: new Array(len).fill(hue), errs: new Array(len).fill(0), len, speed, decay: speed / Math.max(4, opts.trail), hue, call: CC, tag: null, doneAt: 0 });
+  newest.set(CC, { glyphs, at: now });
+  ccSeen++;
+}
+
 // Each call's newest frame, as glyphs: what its trails change to.
 const newest = new Map();
 
@@ -190,7 +228,7 @@ function passes(v) {
 }
 
 // ---- names (the recorder's, or the demo's) ----
-let names = { talkgroup: (v) => `TG ${v.talkgroup}`, unit: (v) => (v.unit ? `${v.unit}` : "") };
+let names = { talkgroup: (v) => `TG ${v.talkgroup}`, unit: (v) => (v.unit ? `${v.unit}` : ""), systemIndex: () => 0 };
 
 // ---- drawing ----
 let lastT = clock();
@@ -222,6 +260,8 @@ function advance(t) {
       pending.delete(q.v.callId);
     }
   }
+  // Control channel lines fall evenly: the queue empties over about a second.
+  for (let n = Math.min(ccQueue.length, Math.ceil(ccQueue.length * dt / 0.8)); n > 0; n--) spawnCC(ccQueue.shift(), t);
   // A stack the talker stopped short of goes as it is.
   for (const [id, p] of pending) {
     if (t - p.at > Math.max(1, opts.stack) * 20 + 80) {
@@ -232,7 +272,7 @@ function advance(t) {
   // Cells dim, linearly; lit ones change glyph as they come of age: to the
   // same place in the talker's newest frame ("data"), or to any glyph.
   const set = glyphSet().length;
-  const { glyph, bright, decay, age, errs, call, k } = cell;
+  const { glyph, bright, decay, age, errs, call, k, layer } = cell;
   const changing = opts.change !== "off" && opts.changeRate > 0;
   for (let i = 0; i < bright.length; i++) {
     if (bright[i] <= 0) continue;
@@ -253,6 +293,12 @@ function advance(t) {
     d.y += d.speed * dt;
     while (d.laid < d.len && d.r0 + d.laid <= Math.floor(d.y)) {
       const c = wrap(d.r0 + d.laid) * cols + d.col;
+      // The control channel stays behind: it doesn't write over a lit voice glyph.
+      if (d.cc && layer[c] === 0 && frames.shown(bright[c]) > 0.05) {
+        d.laid++;
+        continue;
+      }
+      layer[c] = d.cc ? 1 : 0;
       glyph[c] = d.glyphs[d.laid];
       bright[c] = 1;
       decay[c] = d.decay;
@@ -274,11 +320,11 @@ function draw(t) {
   g.fillStyle = "#000";
   g.fillRect(0, 0, W, H);
   const set = glyphSet().length;
-  const { glyph, bright, hue } = cell;
+  const { glyph, bright, hue, layer } = cell;
   const put = (a, gi, c) => g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, (c % cols) * cw - PAD, Math.floor(c / cols) * ch - PAD, a.cellW, a.cellH);
   // Every lit cell, through the palette by its brightness.
   for (let c = 0; c < bright.length; c++) {
-    const b = frames.shown(bright[c]);
+    const b = frames.shown(bright[c]) * (layer[c] ? opts.ccLevel : 1);
     if (b <= 0.02) continue;
     put(palette(hue[c] < 0 ? 0 : hue[c], frames.level(b, LEVELS)), glyph[c] % set, c);
   }
@@ -315,9 +361,11 @@ let fps = 0;
 function hud() {
   fps = framesSeen;
   framesSeen = 0;
+  const ccps = ccSeen;
+  ccSeen = 0;
   const quiet = clock() - lastFrameAt > 8000;
   document.body.classList.toggle("quiet", quiet);
-  $("hud").textContent = `${status()}${quiet ? "\nwaiting for digital voice…" : `\n${fps} frames/s · ${drops.length} falling`}`;
+  $("hud").textContent = `${status()}${quiet ? "\nwaiting for digital voice…" : `\n${fps} frames/s · ${ccps} control/s · ${drops.length} falling`}`;
   if (quiet) $("hud").style.opacity = 1;
   else $("hud").style.opacity = "";
 }
@@ -346,7 +394,7 @@ for (const id of Object.keys(DEFAULTS)) {
     save();
     if (id === "size" || id === "glyphs") layout();
     if (id === "sound") opts.sound ? sound.on() : sound.off();
-    if (id === "sound" || id === "tgFilter") relisten();
+    if (id === "sound" || id === "tgFilter" || id === "cc") relisten();
   });
 }
 addEventListener("resize", layout);
@@ -368,13 +416,18 @@ async function connect() {
       const short = client.systemName(rec.status, v.system);
       return (short && rec.unitName(short, v.unit)) || `${v.unit}`;
     },
+    systemIndex: (short) => Math.max(0, rec.status?.systemNames?.indexOf(short) ?? 0),
   };
   relisten = () => {
     const want = opts.tgFilter.trim();
     rec.listen({ voice: true, audio: !!opts.sound, talkgroup: /^\d+$/.test(want) ? Number(want) : null });
+    // The control channel's messages come on the log topic.
+    rec.subscribe(opts.cc === "off" ? [] : ["log"]);
+    ccQueue.length = 0;
   };
   sound = { on: () => player.resume(), off: () => {} };
   rec.on("voice", (m) => onVoice(frames.fromChunk(m.chunk)));
+  rec.on("log", onLog);
   rec.on("audio", (chunk) => opts.sound && player.play(chunk));
   status = () => (rec.connected ? `● ${rec.phase?.phase === "running" ? "recording" : rec.phase?.phase ?? "connected"}` : "○ connecting…");
   relisten();
@@ -401,6 +454,21 @@ function demo(warmS) {
       onVoice({ ...t, decrypted: false, frames: made });
     }
     for (let i = talkers.length - 1; i >= 0; i--) if (talkers[i].left <= 0) talkers.splice(i, 1);
+    // A control channel's steady beat: grants for the talkers, site broadcasts, the odd unit.
+    const r = (n) => (Math.random() * n) | 0;
+    const mhz = () => (771 + Math.random()).toFixed(5);
+    const lines = [];
+    for (const t of talkers) if (Math.random() < 0.4) lines.push({ kind: "update", text: `Update TG ${t.talkgroup} ${mhz()} MHz` });
+    for (let i = 0; i < 4; i++) {
+      lines.push([
+        { kind: "grant", text: `Grant TG ${100 + r(6)} ${mhz()} MHz src ${4000 + r(900)} slot 0` },
+        { kind: "affiliation", text: `Affiliation ${4000 + r(900)} TG ${100 + r(6)}` },
+        { kind: "sysid", text: `System 0x${r(4096).toString(16)} WACN 0x${r(1 << 20).toString(16)}` },
+        { kind: "adjacent", text: `Adjacent site ${r(9)}.${r(30)} CC ${mhz()} MHz` },
+        { kind: "unknown", text: `Opcode 0x${r(64).toString(16)} mfid 0x90` },
+      ][r(5)]);
+    }
+    onLog({ lines: lines.map((l) => ({ timeS: 0, system: "demo", site: "demo", ...l })) });
   };
   names = { talkgroup: (v) => v.alias ?? `TG ${v.talkgroup}`, unit: (v) => `Unit ${v.unit}` };
   // ?warm=N: N seconds of it already fallen (for screenshots).

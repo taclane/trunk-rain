@@ -76,3 +76,29 @@ test("stacked frames keep each glyph's own hue and errors", () => {
   const s = stack([{ glyphs: [1, 2], hue: 135, errs: 0 }, { glyphs: [3], hue: -1, errs: 4 }]);
   assert.deepEqual(s, { glyphs: [1, 2, 3], hues: [135, 135, -1], errs: [0, 0, 4] });
 });
+
+import { ccShown, ccNibbles, nibbleGlyphs, ccTalkgroup } from "../interface/frames.js";
+
+test("control channel lines: which ones fall", () => {
+  const line = (kind, extra = {}) => ({ timeS: 1, kind, text: "", system: "CLMRN", site: "clmrn-G", ...extra });
+  assert.ok(ccShown(line("grant"), "activity") && ccShown(line("grant"), "all"));
+  assert.ok(!ccShown(line("sysid"), "activity") && ccShown(line("sysid"), "all"));
+  assert.ok(ccShown(line("unknown"), "all"));
+  assert.ok(!ccShown(line("grant"), "off"));
+  assert.ok(!ccShown(line("info"), "all"), "the recorder's own");
+  assert.ok(!ccShown(line("grant", { level: "info" }), "all"), "a recorder line with a level");
+  assert.ok(!ccShown({ kind: "grant", text: "" }, "all"), "no system");
+});
+
+test("a message's numbers become nibbles", () => {
+  const hex = (t) => ccNibbles(t).map((n) => n.toString(16)).join("");
+  assert.equal(hex("Grant TG 11501 771.35625 MHz src 154297 slot 0 ENC"), (11501).toString(16) + (77135625).toString(16) + (154297).toString(16) + "0");
+  assert.equal(hex("Opcode 0x09 mfid 0x90"), "0990");
+  assert.equal(hex("Deregistration 1891034"), (1891034).toString(16));
+  assert.equal(ccNibbles("no numbers").length, 0);
+  assert.equal(ccNibbles("1".repeat(80)).length, 24, "capped");
+  assert.deepEqual(nibbleGlyphs([0xa, 0x3], "bits"), [1, 0, 1, 0, 0, 0, 1, 1]);
+  assert.deepEqual(nibbleGlyphs([0xa], "hex"), [0xa]);
+  assert.equal(ccTalkgroup("Grant TG 11501 771.35625 MHz"), 11501);
+  assert.equal(ccTalkgroup("Deregistration 1891034"), null);
+});

@@ -5,7 +5,11 @@ A Trunk Recorder Pro interface that shows live digital voice as falling vocoder 
 or bits), alone or end to end with the talker's next frames. As on a screen of characters,
 each cell holds one glyph: a falling head writes it, bright, and it dims linearly behind,
 changing now and then to what the talker is saying now. Damaged frames (repeated, muted,
-lost) fall in red. Frames the FEC had to correct flicker, more with more errors. Tags on the
+lost) fall in red.
+
+Behind the voice, the control channel keeps a steady beat: each message it sends (grants,
+updates, registrations, site broadcasts) falls as the hex of its own numbers (talkgroups,
+radios, frequencies), slower and dimmer, and never over a lit voice glyph. Frames the FEC had to correct flicker, more with more errors. Tags on the
 heads name the talkgroup and the radio talking.
 
 ![Vocoder Rain, demo mode](interface/screenshots/main.png)
@@ -40,6 +44,8 @@ of rain already fallen.
 | `trail` | rows behind a head until a glyph is dark, 6–60 (default 20) |
 | `change` | `data` (a lit glyph changes to the same place in the talker's newest frame), `random`, `off` |
 | `changeRate` | glyph changes a second while lit, 0–6 (default 1.8) |
+| `cc` | the control channel behind the voice: `all` (every message), `activity` (grants, updates, units, patches), `off` |
+| `ccLevel` | the control channel layer's brightness, 0.1–1 (default 0.5) |
 | `speed` | rows a second, 4–60 |
 | `size` | glyph size, px |
 | `bad`, `flicker`, `sound` | `1` / `0` |
