@@ -11,8 +11,9 @@
 - Frames a streak (`stack`, 1–4, default 2): a talker's frames end to end, for longer streaks.
   Each glyph keeps its own frame's colour, so a damaged frame is still red.
 - Trail length (`trail`) is an option of its own, so longer streaks don't fill the screen.
-- The control channel as a dimmer layer behind the voice (`cc`: every message, grants/updates/units
-  only, or off; `ccLevel` its brightness): each message's numbers fall as glyphs, from the `log` topic.
+- The control channel on a layer of its own behind the voice (`cc`: every message, grants/updates/units
+  only, or off; `ccLevel` its brightness, background noise by default): each message's numbers fall as
+  glyphs, from the `log` topic. A lit voice glyph covers what's behind it.
 
 ## [0.1.0]
 

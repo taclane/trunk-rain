@@ -9,7 +9,7 @@ lost) fall in red.
 
 Behind the voice, the control channel keeps a steady beat: each message it sends (grants,
 updates, registrations, site broadcasts) falls as the hex of its own numbers (talkgroups,
-radios, frequencies), slower and dimmer, and never over a lit voice glyph. Frames the FEC had to correct flicker, more with more errors. Tags on the
+radios, frequencies), slower and dimmer, on a layer of its own behind the voice. Frames the FEC had to correct flicker, more with more errors. Tags on the
 heads name the talkgroup and the radio talking.
 
 ![Vocoder Rain, demo mode](interface/screenshots/main.png)
@@ -45,7 +45,7 @@ of rain already fallen.
 | `change` | `data` (a lit glyph changes to the same place in the talker's newest frame), `random`, `off` |
 | `changeRate` | glyph changes a second while lit, 0–6 (default 1.8) |
 | `cc` | the control channel behind the voice: `all` (every message), `activity` (grants, updates, units, patches), `off` |
-| `ccLevel` | the control channel layer's brightness, 0.1–1 (default 0.5) |
+| `ccLevel` | the control channel layer's brightness, 0.02–1 (default 0.15: background noise) |
 | `speed` | rows a second, 4–60 |
 | `size` | glyph size, px |
 | `bad`, `flicker`, `sound` | `1` / `0` |

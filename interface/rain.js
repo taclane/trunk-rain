@@ -9,7 +9,7 @@ const canvas = $("rain");
 const g = canvas.getContext("2d");
 
 // ---- settings (a convenience: the page works without storage) ----
-const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.5, bad: true, flicker: true, sound: false, tgFilter: "" };
+const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, cc: "all", ccLevel: 0.15, bad: true, flicker: true, sound: false, tgFilter: "" };
 const opts = { ...DEFAULTS };
 try {
   Object.assign(opts, JSON.parse(localStorage.getItem("rain.opts") ?? "{}"));
@@ -40,7 +40,11 @@ let atlases = new Map();
 // Each cell: its glyph, brightness (0–1) and how fast that falls (a second),
 // hue (-1: a damaged frame's red), the age that changes its glyph, its
 // frame's bit errors, and whose glyph it is (the call, its place in the frame).
-let cell = {};
+// Two grids, two layers: the control channel's behind, the voice's on top.
+// Neither knows of the other; a lit voice glyph covers what's behind it.
+const grid = (n) => ({ glyph: new Uint8Array(n), bright: new Float32Array(n), decay: new Float32Array(n), hue: new Int16Array(n), age: new Float32Array(n), errs: new Uint8Array(n), call: new Float64Array(n), k: new Uint8Array(n) });
+let cell = grid(0);
+let ccCell = grid(0);
 
 function layout() {
   dpr = window.devicePixelRatio || 1;
@@ -55,7 +59,8 @@ function layout() {
   rows = Math.max(1, Math.ceil(H / ch));
   atlases = new Map();
   const n = cols * rows;
-  cell = { glyph: new Uint8Array(n), bright: new Float32Array(n), decay: new Float32Array(n), hue: new Int16Array(n), age: new Float32Array(n), errs: new Uint8Array(n), call: new Float64Array(n), k: new Uint8Array(n), layer: new Uint8Array(n) };
+  cell = grid(n);
+  ccCell = grid(n);
   for (const d of drops) d.col %= cols;
 }
 
@@ -141,9 +146,10 @@ function spawn(v, fs, tag, now) {
   newest.set(v.callId, { glyphs, at: now });
 }
 
-// ---- the control channel: a dimmer layer behind the voice ----
-// Its messages' numbers fall as glyphs too: slower, dimmer, never over a lit
-// voice glyph. Lines come in bursts; they fall evenly over the next second.
+// ---- the control channel: a layer of its own, behind the voice ----
+// Its messages' numbers fall as glyphs too: slower, and as dim as `ccLevel`,
+// background noise by default. Lines come in bursts; they fall evenly over
+// the next second.
 const CC = -1; // `newest`'s key for the newest control channel message
 const ccQueue = [];
 let ccSeen = 0;
@@ -270,20 +276,23 @@ function advance(t) {
     }
   }
   // Cells dim, linearly; lit ones change glyph as they come of age: to the
-  // same place in the talker's newest frame ("data"), or to any glyph.
+  // same place in the talker's (or the control channel's) newest message
+  // ("data"), or to any glyph.
   const set = glyphSet().length;
-  const { glyph, bright, decay, age, errs, call, k, layer } = cell;
-  const changing = opts.change !== "off" && opts.changeRate > 0;
-  for (let i = 0; i < bright.length; i++) {
-    if (bright[i] <= 0) continue;
-    bright[i] = Math.max(0, bright[i] - decay[i] * dt);
-    if (changing && frames.ripen(age, i, opts.changeRate, dt)) {
-      const src = opts.change === "data" ? newest.get(call[i])?.glyphs : null;
-      glyph[i] = src && k[i] < src.length ? src[k[i]] : (Math.random() * set) | 0;
+  for (const grd of [cell, ccCell]) {
+    const { glyph, bright, decay, age, errs, call, k } = grd;
+    const changing = opts.change !== "off" && opts.changeRate > 0;
+    for (let i = 0; i < bright.length; i++) {
+      if (bright[i] <= 0) continue;
+      bright[i] = Math.max(0, bright[i] - decay[i] * dt);
+      if (changing && frames.ripen(age, i, opts.changeRate, dt)) {
+        const src = opts.change === "data" ? newest.get(call[i])?.glyphs : null;
+        glyph[i] = src && k[i] < src.length ? src[k[i]] : (Math.random() * set) | 0;
+      }
+      if (opts.flicker && errs[i] && Math.random() < errs[i] * 0.03 * dt * 60) glyph[i] = (Math.random() * set) | 0;
     }
-    if (opts.flicker && errs[i] && Math.random() < errs[i] * 0.03 * dt * 60) glyph[i] = (Math.random() * set) | 0;
   }
-  // Drops fall, laying their frame's glyphs into the cells they reach.
+  // Drops fall, laying their glyphs into the cells they reach, each in its own layer.
   for (let i = drops.length - 1; i >= 0; i--) {
     const d = drops[i];
     if (d.doneAt) {
@@ -291,22 +300,17 @@ function advance(t) {
       continue;
     }
     d.y += d.speed * dt;
+    const grd = d.cc ? ccCell : cell;
     while (d.laid < d.len && d.r0 + d.laid <= Math.floor(d.y)) {
       const c = wrap(d.r0 + d.laid) * cols + d.col;
-      // The control channel stays behind: it doesn't write over a lit voice glyph.
-      if (d.cc && layer[c] === 0 && frames.shown(bright[c]) > 0.05) {
-        d.laid++;
-        continue;
-      }
-      layer[c] = d.cc ? 1 : 0;
-      glyph[c] = d.glyphs[d.laid];
-      bright[c] = 1;
-      decay[c] = d.decay;
-      cell.hue[c] = d.hues[d.laid];
-      age[c] = Math.random();
-      errs[c] = Math.min(255, d.errs[d.laid]);
-      call[c] = d.call;
-      k[c] = d.laid;
+      grd.glyph[c] = d.glyphs[d.laid];
+      grd.bright[c] = 1;
+      grd.decay[c] = d.decay;
+      grd.hue[c] = d.hues[d.laid];
+      grd.age[c] = Math.random();
+      grd.errs[c] = Math.min(255, d.errs[d.laid]);
+      grd.call[c] = d.call;
+      grd.k[c] = d.laid;
       d.laid++;
     }
     if (d.laid === d.len && Math.floor(d.y) > d.r0 + d.len - 1) d.doneAt = t;
@@ -320,22 +324,34 @@ function draw(t) {
   g.fillStyle = "#000";
   g.fillRect(0, 0, W, H);
   const set = glyphSet().length;
-  const { glyph, bright, hue, layer } = cell;
   const put = (a, gi, c) => g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, (c % cols) * cw - PAD, Math.floor(c / cols) * ch - PAD, a.cellW, a.cellH);
-  // Every lit cell, through the palette by its brightness.
-  for (let c = 0; c < bright.length; c++) {
-    const b = frames.shown(bright[c]) * (layer[c] ? opts.ccLevel : 1);
-    if (b <= 0.02) continue;
-    put(palette(hue[c] < 0 ? 0 : hue[c], frames.level(b, LEVELS)), glyph[c] % set, c);
+  const lit = (grd, c) => frames.shown(grd.bright[c]);
+  // Behind: the control channel's layer, as dim as ccLevel.
+  if (opts.cc !== "off") {
+    g.globalAlpha = opts.ccLevel;
+    for (let c = 0; c < ccCell.bright.length; c++) {
+      const b = lit(ccCell, c);
+      if (b > 0.02) put(palette(ccCell.hue[c] < 0 ? 0 : ccCell.hue[c], frames.level(b, LEVELS)), ccCell.glyph[c] % set, c);
+    }
+    g.globalAlpha = 1;
   }
-  // Each falling frame's head: the cell it wrote last, brightest of all.
+  // On top: the voice. Lit voice glyphs cover their cells first, then glow over them.
+  g.fillStyle = "#000";
+  if (opts.cc !== "off") {
+    for (let c = 0; c < cell.bright.length; c++) if (lit(cell, c) > 0.02) g.fillRect((c % cols) * cw, Math.floor(c / cols) * ch, cw, ch);
+  }
+  for (let c = 0; c < cell.bright.length; c++) {
+    const b = lit(cell, c);
+    if (b > 0.02) put(palette(cell.hue[c] < 0 ? 0 : cell.hue[c], frames.level(b, LEVELS)), cell.glyph[c] % set, c);
+  }
+  // Each falling voice frame's head: the cell it wrote last, brightest of all.
   const tags = [];
   for (const d of drops) {
-    if (!d.laid) continue;
+    if (!d.laid || d.cc) continue;
     const row = wrap(d.r0 + d.laid - 1);
     const c = row * cols + d.col;
     const h = d.hues[d.laid - 1] < 0 ? 0 : d.hues[d.laid - 1];
-    if (!d.doneAt) put(atlas(`hsl(${h} 100% 90%)`, `hsl(${h} 100% 72%)`), glyph[c] % set, c);
+    if (!d.doneAt) put(atlas(`hsl(${h} 100% 90%)`, `hsl(${h} 100% 72%)`), cell.glyph[c] % set, c);
     if (d.tag) tags.push({ x: (d.col + 1) * cw + 3, y: row * ch, text: d.tag, hue: d.hue, alpha: d.doneAt ? Math.max(0, 1 - (t - d.doneAt) / 1000) : 1 });
   }
 
