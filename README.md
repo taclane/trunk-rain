@@ -1,8 +1,10 @@
 # Vocoder Rain
 
 A Trunk Recorder Pro interface that shows live digital voice as falling vocoder frames: each
-20 ms IMBE or AMBE+2 frame falls as one streak of its own information bits, in hex (or kana,
-or bits). The head of a streak is bright, the trail fades. Damaged frames (repeated, muted,
+20 ms IMBE or AMBE+2 frame falls as a streak of its own information bits, in hex (or kana,
+or bits), alone or end to end with the talker's next frames. As on a screen of characters,
+each cell holds one glyph: a falling head writes it, bright, and it dims linearly behind,
+changing now and then to what the talker is saying now. Damaged frames (repeated, muted,
 lost) fall in red. Frames the FEC had to correct flicker, more with more errors. Tags on the
 heads name the talkgroup and the radio talking.
 
@@ -34,6 +36,10 @@ of rain already fallen.
 | `tagEvery` | `sec`, `tx` (each transmission), `drop` (each frame) |
 | `color` | `classic`, `tg`, `unit`, `codec` |
 | `glyphs` | `hex`, `kana`, `bits` |
+| `stack` | frames a streak, 1–4 (default 2): a talker's frames end to end, for longer streaks |
+| `trail` | rows behind a head until a glyph is dark, 6–60 (default 20) |
+| `change` | `data` (a lit glyph changes to the same place in the talker's newest frame), `random`, `off` |
+| `changeRate` | glyph changes a second while lit, 0–6 (default 1.8) |
 | `speed` | rows a second, 4–60 |
 | `size` | glyph size, px |
 | `bad`, `flicker`, `sound` | `1` / `0` |

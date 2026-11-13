@@ -50,3 +50,46 @@ export function glyphsOf(bytes, codec, style) {
  * agency's, still get colours far apart.
  */
 export const hueOf = (system, id) => (((id + system * 0.381966) * 137.50776) % 360 + 360) % 360;
+
+/**
+ * A trail glyph's brightness, 1 at the head down to 0 at `fade` rows behind
+ * it: linear, as a sawtooth falls.
+ */
+export const brightness = (dist, fade) => Math.max(0, 1 - dist / fade);
+
+/**
+ * What a cell's brightness shows as: contrast 1.1 and an offset of -0.45, so
+ * the dimmer part of a trail is dark and only the part near the head glows
+ * (still linear in between).
+ */
+export const shown = (b) => Math.max(0, Math.min(1, (b * 1.1 - 0.45) / 0.65));
+
+/** Brightness 0–1 as one of `levels` palette steps (0: darkest). */
+export const level = (b, levels) => Math.min(levels - 1, Math.floor(b * levels));
+
+/**
+ * Cell `i`'s age moves on by `rate` changes a second; true when it comes of
+ * age (passes 1): its glyph changes, and it starts again.
+ */
+export function ripen(ages, i, rate, dt) {
+  ages[i] += rate * dt;
+  if (ages[i] < 1) return false;
+  ages[i] %= 1;
+  return true;
+}
+
+/**
+ * Frames stacked into one streak: their glyphs end to end, each glyph with
+ * its own frame's hue and bit errors.
+ */
+export function stack(parts) {
+  const glyphs = [], hues = [], errs = [];
+  for (const p of parts) {
+    for (const gl of p.glyphs) {
+      glyphs.push(gl);
+      hues.push(p.hue);
+      errs.push(p.errs);
+    }
+  }
+  return { glyphs, hues, errs };
+}

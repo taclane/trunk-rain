@@ -1,7 +1,7 @@
 // The rain's reading of the recorder's `voice` messages: node --test test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fromChunk, glyphsOf, glyphSet, isBad, hueOf, HEX } from "../interface/frames.js";
+import { fromChunk, glyphsOf, glyphSet, isBad, hueOf, brightness, shown, level, ripen, stack, HEX } from "../interface/frames.js";
 
 // A chunk as the recorder sends it (the `voice` plugin topic's).
 const chunk = {
@@ -53,4 +53,26 @@ test("neighbouring talkgroups get colours far apart", () => {
   for (let i = 0; i < hues.length; i++) for (let j = i + 1; j < hues.length; j++) assert.ok(gap(hues[i], hues[j]) >= 30, `${100 + i} and ${100 + j}`);
   assert.ok(hues.every((h) => h >= 0 && h < 360));
   assert.notEqual(hueOf(0, 101), hueOf(1, 101), "another system's 101");
+});
+
+test("the trail dims linearly from the head", () => {
+  assert.deepEqual([0, 5, 10, 15, 20].map((d) => brightness(d, 20)), [1, 0.75, 0.5, 0.25, 0]);
+  assert.equal(brightness(30, 20), 0);
+  assert.deepEqual([0, 0.19, 0.2, 0.99, 1].map((b) => level(b, 5)), [0, 0, 1, 4, 4]);
+  assert.deepEqual([0, 0.4, 1].map(shown), [0, 0, 1]);
+  const mid = [0.6, 0.7, 0.8].map(shown);
+  assert.ok(Math.abs(mid[1] - mid[0] - (mid[2] - mid[1])) < 1e-9, "linear between");
+});
+
+test("a cell's glyph changes as it comes of age", () => {
+  const ages = Float32Array.from([0.9, 0.5]);
+  assert.equal(ripen(ages, 0, 2, 0.06), true); // +0.12
+  assert.ok(Math.abs(ages[0] - 0.02) < 1e-6);
+  assert.equal(ripen(ages, 1, 2, 0.06), false);
+  assert.equal(ripen(ages, 1, 0, 10), false, "rate 0: never");
+});
+
+test("stacked frames keep each glyph's own hue and errors", () => {
+  const s = stack([{ glyphs: [1, 2], hue: 135, errs: 0 }, { glyphs: [3], hue: -1, errs: 4 }]);
+  assert.deepEqual(s, { glyphs: [1, 2, 3], hues: [135, 135, -1], errs: [0, 0, 4] });
 });

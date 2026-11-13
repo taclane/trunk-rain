@@ -9,7 +9,7 @@ const canvas = $("rain");
 const g = canvas.getContext("2d");
 
 // ---- settings (a convenience: the page works without storage) ----
-const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, bad: true, flicker: true, sound: false, tgFilter: "" };
+const DEFAULTS = { tags: "both", tagEvery: "sec", color: "classic", glyphs: "hex", speed: 18, size: 16, change: "data", changeRate: 1.8, stack: 2, trail: 20, bad: true, flicker: true, sound: false, tgFilter: "" };
 const opts = { ...DEFAULTS };
 try {
   Object.assign(opts, JSON.parse(localStorage.getItem("rain.opts") ?? "{}"));
@@ -29,12 +29,18 @@ const save = () => {
 // ---- glyphs ----
 const glyphSet = () => frames.glyphSet(opts.glyphs);
 
-// ---- grid and atlases ----
+// ---- the grid: one glyph a cell, as on a screen of characters ----
+// Frames falling write their glyphs into the cells they pass; each cell then
+// dims on its own, linearly, and its glyph changes now and then while lit.
 /** Row `r` on screen: past the bottom it comes round to the top. */
 const wrap = (r) => ((r % rows) + rows) % rows;
 let dpr = 1, W = 0, H = 0, cw = 10, ch = 16, cols = 0, rows = 0;
 const PAD = 6; // room for each glyph's glow in its atlas cell
 let atlases = new Map();
+// Each cell: its glyph, brightness (0–1) and how fast that falls (a second),
+// hue (-1: a damaged frame's red), the age that changes its glyph, its
+// frame's bit errors, and whose glyph it is (the call, its place in the frame).
+let cell = {};
 
 function layout() {
   dpr = window.devicePixelRatio || 1;
@@ -48,7 +54,16 @@ function layout() {
   cols = Math.max(1, Math.floor(W / cw));
   rows = Math.max(1, Math.ceil(H / ch));
   atlases = new Map();
+  const n = cols * rows;
+  cell = { glyph: new Uint8Array(n), bright: new Float32Array(n), decay: new Float32Array(n), hue: new Int16Array(n), age: new Float32Array(n), errs: new Uint8Array(n), call: new Float64Array(n), k: new Uint8Array(n) };
   for (const d of drops) d.col %= cols;
+}
+
+/** Palette steps, darkest to brightest: dark and saturated to pale. */
+const LEVELS = 10;
+function palette(hue, i) {
+  const f = (i + 1) / LEVELS;
+  return atlas(`hsl(${hue} ${100 - 30 * f * f}% ${4 + 56 * f}%)`, `hsl(${hue} 100% ${8 + 32 * f}%)`);
 }
 
 /** Every glyph of the current set in `css`, glowing, for drawImage. */
@@ -92,12 +107,12 @@ function hueOf(v) {
   }
 }
 
-// ---- drops: one a frame ----
+// ---- drops: one a frame, writing its glyphs as it falls ----
 const drops = [];
 const MAX_DROPS = 1800;
 const colFreeAt = []; // a column's last drop has left room for another (ms)
 
-function pickCol(now, len) {
+function pickCol(now) {
   let best = 0, bestT = Infinity;
   for (let i = 0; i < 10; i++) {
     const c = (Math.random() * cols) | 0;
@@ -108,26 +123,34 @@ function pickCol(now, len) {
   return best;
 }
 
-function spawn(v, f, tag, now) {
+/** A streak of one or more of a talker's frames, end to end. */
+function spawn(v, fs, tag, now) {
   if (drops.length >= MAX_DROPS) drops.splice(0, drops.length - MAX_DROPS + 1);
-  const glyphs = frames.glyphsOf(f.bits, v.codec, opts.glyphs);
+  const base = Math.round(hueOf(v) / 10) * 10;
+  const { glyphs, hues, errs } = frames.stack(fs.map((f) => ({ glyphs: frames.glyphsOf(f.bits, v.codec, opts.glyphs), hue: frames.isBad(f) && opts.bad ? -1 : base, errs: f.errors })));
   const len = glyphs.length;
   const speed = opts.speed * (0.75 + Math.random() * 0.5); // rows a second
-  const col = pickCol(now, len);
+  const col = pickCol(now);
   // Anywhere: a streak that crosses the bottom carries on from the top.
   const r0 = Math.floor(Math.random() * rows);
   // The next drop in this column waits until this one's head is well down.
   colFreeAt[col] = now + ((len + 4) / speed) * 1000;
-  const bad = frames.isBad(f);
-  drops.push({ col, r0, y: r0, glyphs, len, speed, fade: Math.max(len, 12) * 1.3, hue: hueOf(v), bad, errs: f.errors, tag });
+  // Its trail is gone this many rows behind its head (the glow, about half of it).
+  const fade = Math.max(4, opts.trail);
+  drops.push({ col, r0, y: r0, laid: 0, glyphs, hues, errs, len, speed, decay: speed / fade, hue: base, call: v.callId, tag, doneAt: 0 });
+  newest.set(v.callId, { glyphs, at: now });
 }
+
+// Each call's newest frame, as glyphs: what its trails change to.
+const newest = new Map();
 
 // ---- incoming frames: spread over time as they were spoken ----
 // The page's clock, ms: performance.now(), moved ahead by ?warm.
 let ahead = 0;
 const clock = () => performance.now() + ahead;
 
-const queue = []; // { at, v, f, tag }
+const queue = []; // { at, v, f }
+const pending = new Map(); // call id → { v, fs, tag, at }: frames waiting to stack
 const lastAt = new Map(); // call id → when its last queued frame plays (ms)
 const runs = new Map(); // call id → { unit, start, lastTag }
 let framesSeen = 0, lastFrameAt = 0;
@@ -178,58 +201,97 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-/** Frames due by `t` fall in; every drop moves on to `t`. */
+/** Frames due by `t` fall in; drops move on to `t`, writing as they go; cells dim and change. */
 function advance(t) {
   const dt = Math.min(0.1, (t - lastT) / 1000);
   lastT = t;
   while (queue.length && queue[0].at <= t) {
     const q = queue.shift();
-    spawn(q.v, q.f, tagFor(q.v, t), t);
     framesSeen++;
     lastFrameAt = t;
+    // A talker's frames stack into streaks of `stack` frames; a new talker starts another.
+    let p = pending.get(q.v.callId);
+    if (p && p.v.unit !== q.v.unit) {
+      spawn(p.v, p.fs, p.tag, t);
+      p = null;
+    }
+    if (!p) pending.set(q.v.callId, (p = { v: q.v, fs: [], tag: tagFor(q.v, t), at: t }));
+    p.fs.push(q.f);
+    if (p.fs.length >= Math.max(1, opts.stack)) {
+      spawn(p.v, p.fs, p.tag, t);
+      pending.delete(q.v.callId);
+    }
   }
+  // A stack the talker stopped short of goes as it is.
+  for (const [id, p] of pending) {
+    if (t - p.at > Math.max(1, opts.stack) * 20 + 80) {
+      spawn(p.v, p.fs, p.tag, t);
+      pending.delete(id);
+    }
+  }
+  // Cells dim, linearly; lit ones change glyph as they come of age: to the
+  // same place in the talker's newest frame ("data"), or to any glyph.
   const set = glyphSet().length;
+  const { glyph, bright, decay, age, errs, call, k } = cell;
+  const changing = opts.change !== "off" && opts.changeRate > 0;
+  for (let i = 0; i < bright.length; i++) {
+    if (bright[i] <= 0) continue;
+    bright[i] = Math.max(0, bright[i] - decay[i] * dt);
+    if (changing && frames.ripen(age, i, opts.changeRate, dt)) {
+      const src = opts.change === "data" ? newest.get(call[i])?.glyphs : null;
+      glyph[i] = src && k[i] < src.length ? src[k[i]] : (Math.random() * set) | 0;
+    }
+    if (opts.flicker && errs[i] && Math.random() < errs[i] * 0.03 * dt * 60) glyph[i] = (Math.random() * set) | 0;
+  }
+  // Drops fall, laying their frame's glyphs into the cells they reach.
   for (let i = drops.length - 1; i >= 0; i--) {
     const d = drops[i];
-    d.y += d.speed * dt;
-    if (Math.floor(d.y) - (d.r0 + d.len - 1) > d.fade) {
-      drops.splice(i, 1);
+    if (d.doneAt) {
+      if (t - d.doneAt > 1000) drops.splice(i, 1);
       continue;
     }
-    if (opts.flicker && d.errs && Math.random() < d.errs * 0.03 * dt * 60) {
-      d.glyphs[(Math.random() * d.len) | 0] = (Math.random() * set) | 0;
+    d.y += d.speed * dt;
+    while (d.laid < d.len && d.r0 + d.laid <= Math.floor(d.y)) {
+      const c = wrap(d.r0 + d.laid) * cols + d.col;
+      glyph[c] = d.glyphs[d.laid];
+      bright[c] = 1;
+      decay[c] = d.decay;
+      cell.hue[c] = d.hues[d.laid];
+      age[c] = Math.random();
+      errs[c] = Math.min(255, d.errs[d.laid]);
+      call[c] = d.call;
+      k[c] = d.laid;
+      d.laid++;
     }
+    if (d.laid === d.len && Math.floor(d.y) > d.r0 + d.len - 1) d.doneAt = t;
   }
+  for (const [c, n] of newest) if (t - n.at > 10000) newest.delete(c);
 }
 
 function draw(t) {
   advance(t);
+  g.globalAlpha = 1;
   g.fillStyle = "#000";
   g.fillRect(0, 0, W, H);
   const set = glyphSet().length;
+  const { glyph, bright, hue } = cell;
+  const put = (a, gi, c) => g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, (c % cols) * cw - PAD, Math.floor(c / cols) * ch - PAD, a.cellW, a.cellH);
+  // Every lit cell, through the palette by its brightness.
+  for (let c = 0; c < bright.length; c++) {
+    const b = frames.shown(bright[c]);
+    if (b <= 0.02) continue;
+    put(palette(hue[c] < 0 ? 0 : hue[c], frames.level(b, LEVELS)), glyph[c] % set, c);
+  }
+  // Each falling frame's head: the cell it wrote last, brightest of all.
   const tags = [];
   for (const d of drops) {
-    const head = Math.floor(d.y);
-    const last = d.r0 + d.len - 1;
-    const hue = d.bad && opts.bad ? 0 : d.hue;
-    const body = atlas(`hsl(${hue} 95% ${d.bad && opts.bad ? 58 : 52}%)`, `hsl(${hue} 100% 45%)`);
-    const lit = atlas(`hsl(${hue} 100% 92%)`, `hsl(${hue} 100% 70%)`);
-    const x = d.col * cw;
-    const top = Math.max(d.r0, head - Math.ceil(d.fade));
-    for (let r = Math.min(head, last); r >= top; r--) {
-      const k = r - d.r0;
-      const dist = head - r;
-      const a = dist === 0 ? lit : body;
-      g.globalAlpha = dist === 0 ? 1 : Math.pow(Math.max(0, 1 - dist / d.fade), 1.6) * 0.95;
-      if (g.globalAlpha <= 0.01) continue;
-      const gi = d.glyphs[k] % set;
-      g.drawImage(a, gi * a.cellW * dpr, 0, a.cellW * dpr, a.cellH * dpr, x - PAD, wrap(r) * ch - PAD, a.cellW, a.cellH);
-    }
-    if (d.tag && head <= last + d.fade * 0.6) {
-      tags.push({ x: x + cw + 3, y: wrap(Math.min(head, last)) * ch, text: d.tag, hue: d.hue, alpha: head <= last ? 1 : 1 - (head - last) / (d.fade * 0.6) });
-    }
+    if (!d.laid) continue;
+    const row = wrap(d.r0 + d.laid - 1);
+    const c = row * cols + d.col;
+    const h = d.hues[d.laid - 1] < 0 ? 0 : d.hues[d.laid - 1];
+    if (!d.doneAt) put(atlas(`hsl(${h} 100% 90%)`, `hsl(${h} 100% 72%)`), glyph[c] % set, c);
+    if (d.tag) tags.push({ x: (d.col + 1) * cw + 3, y: row * ch, text: d.tag, hue: d.hue, alpha: d.doneAt ? Math.max(0, 1 - (t - d.doneAt) / 1000) : 1 });
   }
-  g.globalAlpha = 1;
 
   // Tags ride their drop's head, over the rain.
   g.font = TAG_FONT();
@@ -241,7 +303,7 @@ function draw(t) {
     g.fillStyle = "#000";
     g.fillRect(x - 3, tg.y - 1, w + 6, opts.size * 0.95);
     g.globalAlpha = tg.alpha;
-    g.fillStyle = `hsl(${opts.color === "classic" ? 135 : tg.hue} 100% 80%)`;
+    g.fillStyle = `hsl(${opts.color === "classic" || tg.hue < 0 ? 135 : tg.hue} 100% 80%)`;
     g.fillText(tg.text, x, tg.y + 1);
   }
   g.globalAlpha = 1;
@@ -325,7 +387,7 @@ function demo(warmS) {
   const talkers = [];
   const aliases = ["FIRE DISP", "EMS 2", "PD NORTH", "DPW", "TAC 4", "MUTUAL AID"];
   const tick = () => {
-    if (talkers.length < 3 && Math.random() < 0.35) {
+    if (talkers.length < 2 && Math.random() < 0.3) {
       const i = (Math.random() * aliases.length) | 0;
       talkers.push({ callId: (Math.random() * 1e9) | 0, system: 0, talkgroup: 100 + i, unit: 4000 + ((Math.random() * 900) | 0), codec: Math.random() < 0.6 ? "imbe" : "ambe", alias: aliases[i], left: 40 + ((Math.random() * 200) | 0) });
     }

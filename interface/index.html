@@ -49,6 +49,14 @@
     <option value="kana">kana (mirrored)</option>
     <option value="bits">bits</option>
   </select></label>
+  <label>Frames a streak <input id="stack" type="range" min="1" max="4" step="1"></label>
+  <label>Trail changes <select id="change">
+    <option value="data">to the talker's newest frame</option>
+    <option value="random">to any glyph</option>
+    <option value="off">off</option>
+  </select></label>
+  <label>Changes a second <input id="changeRate" type="range" min="0" max="6" step="0.1"></label>
+  <label>Trail <input id="trail" type="range" min="6" max="60" step="1"></label>
   <label>Speed <input id="speed" type="range" min="4" max="60" step="1"></label>
   <label>Size <input id="size" type="range" min="10" max="32" step="1"></label>
   <label>Damaged frames in red <input id="bad" type="checkbox"></label>
